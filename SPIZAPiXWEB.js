@@ -378,6 +378,144 @@ window.ZAPiX._downloadMediaFile = async function(msg) {
 	}
 };
 
+window.ZAPiX._downloadMediaFileWithRetry = async function(msg, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            var url = msgHelper.getDeprecatedMms3Url(msg);
+            if (!url) {
+                console.log('ZAPiX: No URL for media ' + msgHelper.getId(msg) +
+                           ', attempt ' + attempt + '/' + maxRetries);
+                if (msg.mediaData && typeof msg.mediaData.downloadMedia === 'function') {
+                    console.log('ZAPiX: Attempting mediaData.downloadMedia()...');
+                    await msg.mediaData.downloadMedia();
+                    await new Promise(r => setTimeout(r, 5000));
+                    url = msgHelper.getDeprecatedMms3Url(msg);
+                }
+                if (!url) {
+                    if (attempt < maxRetries) {
+                        await new Promise(r => setTimeout(r, 3000 * attempt));
+                        continue;
+                    }
+                    throw new Error('No media URL available after ' + maxRetries + ' attempts');
+                }
+            }
+            var msgType = msgHelper.getType(msg);
+            if (msgType === 'sticker' && msg.mediaData && typeof msg.mediaData.downloadMedia === 'function') {
+                console.log('ZAPiX: Using sticker-specific download path...');
+                await msg.mediaData.downloadMedia();
+                await new Promise(r => setTimeout(r, 3000));
+                url = msgHelper.getDeprecatedMms3Url(msg);
+                if (!url && attempt < maxRetries) {
+                    await new Promise(r => setTimeout(r, 3000 * attempt));
+                    continue;
+                }
+            }
+            await window.ZAPiX._downloadMediaFile(msg);
+            return;
+        } catch(e) {
+            console.log('ZAPiX: Download attempt ' + attempt + ' failed: ' + e.message);
+            if (attempt === maxRetries) {
+                console.log('ZAPiX: All retries exhausted, attempting preview save...');
+                try {
+                    window.ZAPiX._internal_saveAttachmentPreview(msg);
+                } catch(pe) {
+                    console.log('ZAPiX: Preview also failed: ' + pe.message);
+                }
+                addFile2Zip('FAILED_' + msgHelper.getId(msg) + '.json',
+                    [blobfy({
+                        msgId: msgHelper.getId(msg),
+                        type: msgHelper.getType(msg),
+                        error: e.message,
+                        hasMediaKey: !!msgHelper.getMediaKey(msg),
+                        timestamp: msg.__x_t || msg.t
+                    }), { level: 9 }]);
+            }
+        }
+    }
+};
+
+window.ZAPiX._filterPhantomMessages = function(rawMsgs) {
+    return rawMsgs.filter(function(msg) {
+        var mType = msgHelper.getType(msg);
+        var body = msgHelper.getBody(msg);
+        if ((mType === 'e2e_notification' || mType === 'protocol') &&
+            !body && !msgHelper.getMediaKey(msg)) {
+            return false;
+        }
+        if (body && (body.indexOf('No se pudo cargar este mensaje') !== -1 ||
+                     body.indexOf('Couldn\'t load this message') !== -1)) {
+            return false;
+        }
+        return true;
+    });
+};
+
+window.ZAPiX._processAlbumMetadata = function(msgs, chatId) {
+    var albums = {};
+    for (var i = 0; i < msgs.length; i++) {
+        var msg = msgs[i];
+        if (msg.__x_isAlbum && msg.__x_albumMsgs) {
+            var albumId = msgHelper.getId(msg);
+            albums[albumId] = {
+                albumHeaderId: albumId,
+                timestamp: msg.__x_t || msg.t,
+                childMsgIds: msg.__x_albumMsgs.map(function(m) { return m._serialized || m; }),
+                childCount: msg.__x_albumMsgs.length,
+                type: 'album_header'
+            };
+        }
+        if (msg.__x_parentMsgKey) {
+            var parentKey = msg.__x_parentMsgKey._serialized || msg.__x_parentMsgKey;
+            if (!albums[parentKey]) {
+                albums[parentKey] = {
+                    albumHeaderId: parentKey,
+                    childMsgIds: [],
+                    type: 'album_reconstructed'
+                };
+            }
+            albums[parentKey].childMsgIds.push(msgHelper.getId(msg));
+        }
+    }
+    if (Object.keys(albums).length > 0) {
+        console.log('ZAPiX: Found ' + Object.keys(albums).length + ' albums in chat ' + chatId);
+        addFile2Zip('album_metadata_' + chatId + '.json', [blobfy(albums), { level: 9 }]);
+    }
+    return albums;
+};
+
+window.ZAPiX._triggerSync = async function(maxWaitMs) {
+    if (typeof maxWaitMs === 'undefined') maxWaitMs = 120000;
+    var banners = document.querySelectorAll('[role="button"]');
+    var syncBanner = null;
+    for (var i = 0; i < banners.length; i++) {
+        var b = banners[i];
+        if (b.textContent.indexOf('obtener mensajes anteriores') !== -1 ||
+            b.textContent.indexOf('Get earlier messages') !== -1) {
+            syncBanner = b;
+            break;
+        }
+    }
+    if (!syncBanner) {
+        console.log('ZAPiX: No sync banner found - all messages may already be loaded');
+        return true;
+    }
+    syncBanner.click();
+    console.log('ZAPiX: Sync triggered, waiting for messages...');
+    var startTime = Date.now();
+    while (Date.now() - startTime < maxWaitMs) {
+        await new Promise(function(r) { setTimeout(r, 3000); });
+        var stillSyncing = document.querySelector('[data-icon="spinner-light"]') ||
+                          document.querySelector('[data-icon="spinner"]');
+        if (!stillSyncing) {
+            console.log('ZAPiX: Sync appears complete after ' +
+                        ((Date.now() - startTime) / 1000) + 's');
+            return true;
+        }
+    }
+    console.log('ZAPiX: Sync timeout reached');
+    return false;
+};
+
 window.ZAPiX._getUserContacts =  function () {
     return contactCollection._models.filter((contact) => contact.syncToAddressbook==true && (contactHelper.getCanRequestPhoneNumber(contact) === true || contactHelper.getIsMe(contact) === true)).map((contact) => window.ZAPiX._serializeContactObj(contact));
 };
@@ -448,19 +586,23 @@ window.ZAPiX._internal_getallchats = async function (){
 	console.log('Getting messages from:'+chatCount+' chats');
 	for (var i = 0; i < chatCount; i++) {
 		chatName = chats[i].__x_formattedTitle;
-		var msgs = chats[i].msgs._models;
+		var rawMsgs = chats[i].msgs._models;
+		var msgs = window.ZAPiX._filterPhantomMessages(rawMsgs);
+		if (msgs.length < rawMsgs.length) {
+			console.log('ZAPiX: Filtered ' + (rawMsgs.length - msgs.length) + ' phantom messages from chat ' + chats[i].__x_id);
+		}
 		addFile2Zip('Chat '+chats[i].__x_id+'.json', [blobfy(msgs),{ level:9}]);
+		window.ZAPiX._processAlbumMetadata(msgs, chats[i].__x_id);
         chatName = chats[i].__x_formattedTitle; 
 		for (var m=0; m < msgs.length; m++){
 			window.ZAPiX._statusTextnode.data = "Chat "+chatName+"-"+i+"/"+chatCount+" - Message "+m+"/"+msgs.length;
 		
 			msgType = msgHelper.getType(msgs[m]);
-			if (msgType=='image' || msgType=='video' || msgType=='ptt' || msgType=='document' || msgType=='sticker'){
+			if (msgType=='image' || msgType=='video' || msgType=='ptt' || msgType=='audio' || msgType=='document' || msgType=='sticker'){
 				try{
-					await window.ZAPiX._downloadMediaFile(msgs[m]);
+					await window.ZAPiX._downloadMediaFileWithRetry(msgs[m]);
 				}catch(e){
 					console.log('Error downloading '+msgType+':'+e.message+". Using embedded data.");
-					//window.ZAPiX._internal_saveAttachmentPreview(msgs[m])
 				}
 			} 
 			else if (msgType=='vcard'){
@@ -514,18 +656,21 @@ window.ZAPiX._internal_getchat = async function (chatName){
 	console.log('Getting messages from:'+chat.id+' chats');
     resultOfFiltering = chatCollection._models.filter((c)=>c.__x_id._serialized === chat.id)
     if (resultOfFiltering.length > 0){
-        var msgs = resultOfFiltering[0].msgs._models;
-        //console.log(msgs);
-        addFile2Zip('Chat '+chat.id+'.json', [blobfy(msgs),{ level:9}]); 
+        var rawMsgs = resultOfFiltering[0].msgs._models;
+        var msgs = window.ZAPiX._filterPhantomMessages(rawMsgs);
+        if (msgs.length < rawMsgs.length) {
+            console.log('ZAPiX: Filtered ' + (rawMsgs.length - msgs.length) + ' phantom messages from chat ' + chat.id);
+        }
+        addFile2Zip('Chat '+chat.id+'.json', [blobfy(msgs),{ level:9}]);
+        window.ZAPiX._processAlbumMetadata(msgs, chat.id);
 		for (var m=0; m < msgs.length; m++){
             msgType = msgHelper.getType(msgs[m]);
             console.log(msgType);
-			if (msgType=='image' || msgType=='video' || msgType=='ptt' || msgType=='document' || msgType=='sticker'){
+			if (msgType=='image' || msgType=='video' || msgType=='ptt' || msgType=='audio' || msgType=='document' || msgType=='sticker'){
 				try{
-					await window.ZAPiX._downloadMediaFile(msgs[m]);
+					await window.ZAPiX._downloadMediaFileWithRetry(msgs[m]);
 				}catch(e){
 					console.log('Error downloading '+msgType+':'+e.message+". Using embedded data.");
-					//window.ZAPiX._internal_saveAttachmentPreview(msgs[m])
 				}
 			} 
 			else if (msgType=='vcard'){
