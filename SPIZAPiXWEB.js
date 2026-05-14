@@ -12,8 +12,6 @@ ZAPiXWEB WhatsApp Extractor - 4 CHROME, FIREFOX, EDGE, OPERA
 (It also works offline for Browser extractions)
 
 Script Name: SPIZAPIXWEB.js
-Version: 2.3.1
-Revised Date: 31/12/2025
 
 Description: A script that extracts throught Whatsapp WEB data records.
 Technique described in paper:
@@ -24,29 +22,9 @@ URL: https://github.com/kraftdenker/cellebrite-UFEDPA-scripts
 
 Manual: Copy and paste all this code into browser console + ENTER. 
 Follow the commands in console window.
-In Firefox, you have to manually type "allow paste" into the console to enable pasting.
-
----> (FOLLOWING INSTRUCTIONS FOR DESKTOP TECHNIQUE IS NOW DEPRECATED - META CHANGED DESKTOP RUNTIME TO DOTNET APP) 
-WhatsApp Desktop  - Electron (For this whatsapp version, it only works online): 
+In Firefox, you have to manually type "allow paste"/"allow pasting" into the console to enable pasting.
 -----------------------------------------------------------------
 
-- ChangeLog -
-v1 		- [05-18-21]: Wrote original code
-v1.2	- [09-27-21]: Command to extract one or more chats.
-v1.3	- [10-08-21]: Correct chat extraction
-v1.4	- [12-03-21]: Change extraction to full support multiple devices
-v1.5	- [02-21-22]: Hash, new decryption code (using vendor module ligsignal)
-v1.5.1	- [08-31-22]: Adjust in which DOM element to grab the current chat name
-v1.6	- [08-31-22]: Adaptation for use with Electron (Whatsapp Desktop App)
-v1.7	- [01-04-23]: Adaption to new quotedMsg structure.
-v1.8	- [03-01-23]: Adjust grabbing the current chat name
-v1.9	- [07-26-23]: Adjust grabbing the current user account id.
-v1.10	- [02-29-24]: function ZAPiX._internal_getChatByName getting chatname also using new field 'formattedTitle'
-v2.0	- [06-23-24]: Code adaptions to new secutiry directives enabled by Meta. All included libraries no more need. All code using only meta dependencies. 
-v2.1	- [08-01-24]: Function to clean chatnames with htmlcode(emojis) to be used by getchatbyname process (Add current chat option).
-v.2.2 - [04-04-25]: Change in saveFile function to pure JS code (cutting dependecy with FileAPI) for compatibility issues with firefox and Safari
-v.2.3 - [09-05-25]: update UserData function to get PhoneNumber 
-v.2.3.1 - [31-12-25]: Change contacts filtering.
 Author: alberto.magno@gmail.com (https://github.com/kraftdenker)  _
 */
 
