@@ -18,9 +18,8 @@ Technique described in paper:
 Soares, A. (2022). WhatsApp Web Client Live Forensics Technique. In Proceedings of the 8th International Conference on Information Systems Security and Privacy - ICISSP, ISBN 978-989-758-553-1, pages 629-636. DOI: 10.5220/0011006400003120
 
 Copyright: 2021 Alberto Magno <alberto.magno@gmail.com> 
-URL: https://github.com/kraftdenker/cellebrite-UFEDPA-scripts
 
-Manual: Copy and paste all this code into browser console + ENTER. 
+HOWTO: Copy and paste all this code into browser console + ENTER. 
 Follow the commands in console window.
 In Firefox, you have to manually type "allow paste"/"allow pasting" into the console to enable pasting.
 -----------------------------------------------------------------
